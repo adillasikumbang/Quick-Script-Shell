@@ -16,6 +16,8 @@ function valid_ip()
     return $stat
 }
 
+instance_summary=""
+
 while true; do
     PS3='Enter the number of the type of instance you want to add: '
     options=("node_exporter" "cadvisor" "Custom" "Quit")
@@ -36,9 +38,11 @@ while true; do
                 break
                 ;;
             "Quit")
+                echo -e "\nSummary of Instances:"
+                echo -e "$instance_summary"
                 exit 0
                 ;;
-            *) echo "invalid option $REPLY";;
+            *) echo "Invalid option $REPLY";;
         esac
     done
 
@@ -60,6 +64,7 @@ while true; do
     scrape_interval: 5s
     static_configs:
       - targets: ['$instance_ip:$instance_port']
+
 EOF
 
     # Check if the instance type exists in the prometheus.yml file
@@ -68,14 +73,18 @@ EOF
         sed -i "/#### ${instance_type} ####/r $temp_file" prometheus.yml
     else
         # If it doesn't, append the new instance configuration at the end of the file
-        echo "#### ${instance_type} ####" >> prometheus.yml
+        echo -e "#### ${instance_type} ####\n" >> prometheus.yml
         cat $temp_file >> prometheus.yml
     fi
+
+    instance_summary+="Instance Type: $instance_type\nInstance Name: $instance_name\nInstance IP: $instance_ip\nInstance Port: $instance_port\n\n"
 
     rm $temp_file
 
     read -p "Do you want to add another instance? (y/n): " answer
     if [[ $answer != "y" ]]; then
+        echo -e "\nSummary of Instances:"
+        echo -e "$instance_summary"
         break
     fi
 done
