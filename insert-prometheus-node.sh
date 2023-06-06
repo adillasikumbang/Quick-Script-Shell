@@ -16,6 +16,28 @@ function valid_ip()
     return $stat
 }
 
+function check_duplicate_ip_and_type()
+{
+    local type=$1
+    local ip=$2
+    local port=$3
+    grep -q "$ip:$port" prometheus.yml && grep -B 2 "$ip:$port" prometheus.yml | grep -q "$type"
+    return $?
+}
+
+function check_duplicate_name()
+{
+    local name=$1
+    grep -q "job_name: '$name'" prometheus.yml
+    return $?
+}
+
+function print_duplicate_instance()
+{
+    local name=$1
+    grep -A 4 "job_name: '$name'" prometheus.yml
+}
+
 instance_summary=""
 
 while true; do
@@ -40,22 +62,38 @@ while true; do
             "Quit")
                 echo -e "\nSummary of Instances:"
                 echo -e "$instance_summary"
+                curl -X POST http://localhost:8430/-/reload
                 exit 0
                 ;;
             *) echo "Invalid option $REPLY";;
         esac
     done
 
-    read -p "Enter the instance name: " instance_name
-    # Remove "_exporter" from the instance name
-    job_name="${instance_type%_exporter}_$instance_name"
+    while true; do
+        read -p "Enter the instance name: " instance_name
+        job_name="${instance_type%_exporter}_$instance_name"
+        if check_duplicate_name $job_name; then 
+            echo "Duplicate instance name, please retry"
+            echo -e "\nDuplicate Instance Summary:"
+            print_duplicate_instance $job_name
+        else 
+            break
+        fi
+    done
 
     while true; do
         read -p "Enter the instance IP: " instance_ip
         if valid_ip $instance_ip; then break; else echo "Invalid IP, please retry"; fi
     done
 
-    read -p "Enter the instance port: " instance_port
+    while true; do
+        read -p "Enter the instance port: " instance_port
+        if check_duplicate_ip_and_type $instance_type $instance_ip $instance_port; then 
+            echo "Same IP address with different instance type found, please retry"
+        else 
+            break
+        fi
+    done
 
     temp_file=$(mktemp)
 
@@ -67,16 +105,8 @@ while true; do
 
 EOF
 
-    # Check if the instance type exists in the prometheus.yml file
-    if grep -q "#### ${instance_type} ####" prometheus.yml; then
-        # If it does, append the new instance configuration at that position
-        sed -i "/#### ${instance_type} ####/r $temp_file" prometheus.yml
-    else
-        # If it doesn't, append the new instance configuration at the end of the file
-        echo -e "#### ${instance_type} ####\n" >> prometheus.yml
-        cat $temp_file >> prometheus.yml
-    fi
-
+    echo -e "#### ${instance_type} ####\n" >> prometheus.yml
+    cat $temp_file >> prometheus.yml
     instance_summary+="Instance Type: $instance_type\nInstance Name: $instance_name\nInstance IP: $instance_ip\nInstance Port: $instance_port\n\n"
 
     rm $temp_file
@@ -85,6 +115,7 @@ EOF
     if [[ $answer != "y" ]]; then
         echo -e "\nSummary of Instances:"
         echo -e "$instance_summary"
+        curl -X POST http://localhost:8430/-/reload
         break
     fi
 done
